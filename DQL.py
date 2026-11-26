@@ -5,11 +5,11 @@ from config import *
 def get_known_user():
     conn = mysql.connector.connect(**db_config)
     cur = conn.cursor(dictionary=True)
-    cur.execute("SELECT CID,BIRTH_DATE FROM CUSTOMER;")
+    cur.execute("SELECT * FROM CUSTOMER;")
     data = cur.fetchall()
     cur.close()
     conn.close()
-    return {row['CID']: row['BIRTH_DATE'] for row in data}
+    return {row['CID']: row for row in data}
 
 def get_customer_data():
     conn = mysql.connector.connect(**db_config)

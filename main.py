@@ -11,8 +11,8 @@ from DQL import *
 
 
 API_TOKEN = db_config1['API_TOKEN']
-channel_cid = db_config2['channel_cid']
-admin = [8802868562]
+channel_cid = int(db_config1['channel_cid'])
+admins = eval(db_config1['admins'])
 
 bot = telebot.TeleBot(API_TOKEN)
 hideboard = ReplyKeyboardRemove()
@@ -53,9 +53,9 @@ bot.set_update_listener(listener)
 
 def send_message(*args, **kwargs):
     try:
-        return antiflood(bot.send_message, *args,**kwargs)
+        return antiflood(bot.send_message, *args, **kwargs)
     except telebot.apihelper.ApiTelegramException:
-        print('bot was blocked by user.')
+        print(f'bot was blocked by the user')
     except Exception as e:
         print(repr(e))
 
@@ -137,18 +137,21 @@ def create_times(cid):
             buttons.append(InlineKeyboardButton(times , callback_data=f'time_{times}'))
         start_time += duration
     markup.add(*buttons)
+    markup.add(InlineKeyboardButton(text['turn_back'], callback_data='turn_back2'))
     return markup
 
 def birth_message():
     global known_users
     known_users = get_known_user()
     today = datetime.date.today()
-    for cid,birth in known_users.items():
+    for cid, user in known_users.items():
+        birth = user['BIRTH_DATE']
         if birth is not None:
             birth_month = birth.month
             birth_day = birth.day
-            if today.month == birth_month and today.day == birth_day:
-                bot.copy_message(cid, channel_cid, message_ids[text["birth_takhfif"]])
+            if today.month == birth_month:
+                if today.day == birth_day:
+                    bot.copy_message(cid, channel_cid, message_ids[text["birth_takhfif"]])
 birth_message()
 
 @bot.callback_query_handler(func= lambda call: call.data.startswith(('category','service')))
@@ -220,19 +223,18 @@ def callback_month_date_handler(call):
             bot.answer_callback_query(call_id, text['date_none'])
         else:
             select_date = data.replace('date_','')
-            select_date1 = jdatetime.date.strptime(select_date, '%Y_%m_%d')
             if cid not in user_data:
                 user_data[cid] = {}
-            user_data[cid]['date'] = select_date1
+            user_data[cid]['date'] = select_date
             service_id = user_data[cid]['service_id']
             personnel_ids = get_personnel_service_id(serv_id=service_id)
             markup = InlineKeyboardMarkup()
             buttons = []
-
             for personnel_id in personnel_ids:
                 person = get_personnel_data(ID=personnel_id)
                 buttons.append(InlineKeyboardButton(f'{person["NAME"]}',callback_data=f'person_{person["NAME"]}'))
             markup.add(*buttons)
+            markup.add(InlineKeyboardButton(text['turn_back'], callback_data='turn_back1'))
             bot.answer_callback_query(call_id, text['list_personnel'])
             bot.edit_message_text(text['select_personnel'], cid, mid, reply_markup=markup)
     else:
@@ -255,34 +257,64 @@ def callback_personnel_handler(call):
         new_markup = create_times(cid)
         bot.answer_callback_query(call_id, text['time'])
         bot.edit_message_text(text['choose_time'], cid,mid, reply_markup=new_markup)
-    elif data == 'turn_back':
-        category_id = user_data[cid]['categ_id']
-        services = get_service_data(categ_id=category_id)
-        markup = InlineKeyboardMarkup()
-        buttons = []
-        for service in services:
-            buttons.append(InlineKeyboardButton(f'{service["NAME"]}', callback_data=f'service_{service["NAME"]}'))
-        markup.add(*buttons)
-        bot.answer_callback_query(call_id, text['call_service'])
-        bot.edit_message_text(text['choose_service'], cid, mid, reply_markup=markup)
+    elif data.startswith('turn'):
+        if data == 'turn_back':
+            category_id = user_data[cid]['categ_id']
+            services = get_service_data(categ_id=category_id)
+            markup = InlineKeyboardMarkup()
+            buttons = []
+            for service in services:
+                buttons.append(InlineKeyboardButton(f'{service["NAME"]}', callback_data=f'service_{service["NAME"]}'))
+            markup.add(*buttons)
+            bot.answer_callback_query(call_id, text['call_service'])
+            bot.edit_message_text(text['choose_service'], cid, mid, reply_markup=markup)
+        elif data == 'turn_back1':
+            new_markup = create_calendar()
+            bot.answer_callback_query(call_id, text['calendar'])
+            bot.edit_message_text(text['choose_date'], cid,mid, reply_markup=new_markup)
+        elif data == 'turn_back2':
+            service_id = user_data[cid]['service_id']
+            personnel_ids = get_personnel_service_id(serv_id=service_id)
+            markup = InlineKeyboardMarkup()
+            buttons = []
+            for personnel_id in personnel_ids:
+                person = get_personnel_data(ID=personnel_id)
+                buttons.append(InlineKeyboardButton(f'{person["NAME"]}',callback_data=f'person_{person["NAME"]}'))
+            markup.add(*buttons)
+            markup.add(InlineKeyboardButton(text['turn_back'], callback_data='turn_back1'))
+            bot.answer_callback_query(call_id , text['list_personnel'])
+            bot.edit_message_text(text['select_personnel'], cid,mid, reply_markup=markup)
     else:
         bot.answer_callback_query(call_id, text['unknown_button'])
         bot.edit_message_reply_markup(cid, mid, reply_markup=None)
 
 @bot.callback_query_handler(func= lambda call: call.data.startswith(('time','next')))
 def callback_time_handler(call):
+    global known_users
     call_id = call.id
     cid = call.message.chat.id
     mid = call.message.message_id
     data = call.data
+    known_users = get_known_user()
     if data.startswith('time'):
         select_time = data.replace('time_', '')
         if cid not in user_data:
             user_data[cid] = {}
         user_data[cid]['hour'] = select_time
-        bot.answer_callback_query(call_id, text['information'])
-        bot.edit_message_text(text['full_name'],cid, mid, reply_markup=None)
-        user_step[cid] = 'FN'
+        if cid in known_users:
+            name = known_users[cid]['NAME']
+            service = user_data[cid]['service']
+            date = user_data[cid]['date']
+            personnel = user_data[cid]['personnel']
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton('❌', callback_data='cancel'),
+               InlineKeyboardButton('✅', callback_data='ok'))
+            bot.answer_callback_query(call_id, text['dar_hale_sabt'])
+            bot.edit_message_text(text['reserv_message'].format(name,service,date,select_time,personnel),cid, mid, reply_markup=markup)
+        else:
+            bot.answer_callback_query(call_id, text['information'])
+            bot.edit_message_text(text['full_name'],cid, mid, reply_markup=None)
+            user_step[cid] = 'FN'
     elif data.startswith('next'):
         name = user_data[cid]['name']
         service = user_data[cid]['service']
@@ -300,31 +332,41 @@ def callback_time_handler(call):
 
 @bot.callback_query_handler(func= lambda call: call.data in ['ok', 'cancel'])
 def callback_ok_cancel_handler(call):
+    global known_users
     call_id = call.id
     cid = call.message.chat.id
     mid = call.message.message_id
     data = call.data
+    known_users = get_known_user()
     if data == 'ok':
         birth = user_data[cid].setdefault('birth', None)
         if birth == None:
             birth1 = None
         else:
             birth1 = birth.togregorian()
-        name = user_data[cid]['name']
-        number = user_data[cid]['number']
         service = user_data[cid]['service']
         date = user_data[cid]['date']
-        date1 = date.togregorian()
+        shamsi_date = jdatetime.date.strptime(date, '%Y_%m_%d')
+        miladi_date = shamsi_date.togregorian()
         hour = user_data[cid]['hour']
         personnel = user_data[cid]['personnel']
         pers_id = user_data[cid]['pers_id']
         serv_id = user_data[cid]['service_id']
         pers_serv_id = get_personnel_service_data(pers_id=pers_id,serv_id=serv_id)
-        customer_data = insert_customer_data(cid=cid,name=name,phone=number,birth_date=birth1)
-        taking_turn_data = insert_taking_turn_data(cust_id=cid,pers_serv_id=pers_serv_id,date=date1,time=hour,status='reserved')
-        bot.answer_callback_query(call_id, text['sabt'])
-        bot.edit_message_text(text['reservation_message'].format(name,service,date,hour,personnel),cid ,mid, reply_markup=None)
-        user_step.pop(cid)
+        if cid in known_users:
+            user_name = known_users[cid]['NAME']
+            taking_turn_data = insert_taking_turn_data(cust_id=cid,pers_serv_id=pers_serv_id,date=miladi_date,time=hour,status='reserved')
+            bot.answer_callback_query(call_id, text['sabt'])
+            bot.edit_message_text(text['reservation_message'].format(user_name,service,date,hour,personnel),cid ,mid, reply_markup=None)
+        else:
+            name = user_data[cid]['name']
+            number = user_data[cid]['number']
+            customer_data = insert_customer_data(cid=cid,name=name,phone=number,birth_date=birth1)
+            taking_turn_data = insert_taking_turn_data(cust_id=cid,pers_serv_id=pers_serv_id,date=miladi_date,time=hour,status='reserved')
+            bot.answer_callback_query(call_id, text['sabt'])
+            bot.edit_message_text(text['reservation_message'].format(name,service,date,hour,personnel),cid ,mid, reply_markup=None)
+            user_step.pop(cid)
+
     elif data == 'cancel':
         bot.answer_callback_query(call_id, text['laqv'])
         bot.edit_message_reply_markup(cid, mid, reply_markup=None)
@@ -354,7 +396,7 @@ def command_start_handler(message):
 @bot.message_handler(commands=["help"])
 def command_help_handler(message):
     cid = message.chat.id
-    if cid in admin:
+    if cid in admins:
         x = f'****{text['admin']}****\n'
         for command, desc in admin_commands.items():
             x += f'/{command} : {desc}\n'
@@ -365,7 +407,7 @@ def command_help_handler(message):
 @bot.message_handler(commands=['add_category'])
 def cammand_add_category_handler(message):
     cid = message.chat.id
-    if cid in admin:
+    if cid in admins:
         send_message(cid, text['add_category']+'\n'
 f"""
 {text['name']}:{text['category_name']}
@@ -377,7 +419,7 @@ f"""
 @bot.message_handler(commands=['add_service'])
 def command_add_service_handler(message):
     cid = message.chat.id
-    if cid in admin:
+    if cid in admins:
         send_message(cid, text['add_service'] +'\n'
 f"""
 {text['line']}:{text['category_name']}
@@ -391,8 +433,8 @@ f"""
 @bot.message_handler(commands=['add_personnel'])
 def command_add_personnel_handler(message):
     cid = message.chat.id
-    if cid in admin:
-        bot.send_message(cid, text['add_personnel'] +'\n'
+    if cid in admins:
+        send_message(cid, text['add_personnel'] +'\n'
 f"""
 {text['name']}:{text['personnel_name']}
 {text['khedmat']}:{text['service_name1']},{text['service_name2']}
@@ -404,8 +446,8 @@ f"""
 @bot.message_handler(commands=['add_capacity'])
 def command_add_capacity_handler(message):
     cid = message.chat.id
-    if cid in admin:
-        bot.send_message(cid, text['add_capacity'] + '\n'
+    if cid in admins:
+        send_message(cid, text['add_capacity'] + '\n'
 f"""
 {text['name']}:{text['personnel_name']}
 {text['khedmat']}:{text['service_name']}
@@ -419,7 +461,7 @@ f"""
 @bot.message_handler(commands=['show_customers'])
 def command_show_customer_handler(message):
     cid = message.chat.id
-    if cid in admin:
+    if cid in admins:
         customers = get_customer_data()
         for customer in customers:
             admin_message=(
@@ -435,7 +477,7 @@ def command_show_customer_handler(message):
 @bot.message_handler(commands=['show_taking_turns'])
 def command_show_taking_turns(message):
     cid = message.chat.id
-    if cid in admin:
+    if cid in admins:
         taking_turns = get_taking_turn_data()
         for taking_turn in taking_turns:
             admin_message=(
@@ -452,8 +494,8 @@ def command_show_taking_turns(message):
 @bot.message_handler(commands=['add_day_off'])
 def command_day_off_handler(message):
     cid = message.chat.id
-    if cid in admin:
-        bot.send_message(cid, text['add_day_off'] + '\n'
+    if cid in admins:
+        send_message(cid, text['add_day_off'] + '\n'
 f"""
 {text['rooz']}:{text['tarikh']}
 """)
@@ -470,7 +512,7 @@ def reservetion_handler(message):
     for category in categories:
         buttons.append(InlineKeyboardButton(f'{category["NAME"]}',callback_data=f'category_{category["NAME"]}'))
     markup.add(*buttons)
-    bot.send_message(cid, text['choose_line'], reply_markup = markup)
+    send_message(cid, text['choose_line'], reply_markup = markup)
 
 @bot.message_handler(func= lambda message: message.text in [text['cancel_reserve']])
 def cancel_reserve_handler(message):
@@ -485,11 +527,11 @@ def cancel_reserve_handler(message):
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton('❌',callback_data='no'),
                         InlineKeyboardButton('✅', callback_data='yes'))
-                bot.send_message(cid, text['ask_laqv'], reply_markup=markup)
+                send_message(cid, text['ask_laqv'], reply_markup=markup)
             else:
-                bot.send_message(cid, text['no_cancel'])
+                send_message(cid, text['no_cancel'])
         else:
-            bot.send_message(cid, text['no_cancel'])
+            send_message(cid, text['no_cancel'])
 
 @bot.message_handler(func= lambda message: message.text in [text["call_us"]])
 def call_us_handler(message):
@@ -587,7 +629,7 @@ def user_step_BD_handler(message):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton('❌', callback_data='cancel'),
                InlineKeyboardButton('✅', callback_data='ok'))
-    bot.send_message(cid, text['reserv_message'].format(name,service,date,hour,personnel),reply_markup=markup)
+    send_message(cid, text['reserv_message'].format(name,service,date,hour,personnel),reply_markup=markup)
     user_step.pop(cid)
 
 @bot.message_handler(content_types=['contact'])
@@ -599,7 +641,7 @@ def content_contact_handler(message):
         if cid not in user_data:
             user_data[cid] = {}
         user_data[cid]['number'] = phone_number
-        sent_message = bot.send_message(cid, text['button_number'], reply_markup=hideboard)
+        sent_message = send_message(cid, text['button_number'], reply_markup=hideboard)
         bot.delete_message(cid, sent_message.message_id)
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(text['next'], callback_data='next_step'))
